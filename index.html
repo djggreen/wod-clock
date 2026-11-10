@@ -64,6 +64,9 @@
   #resetBtn { background: #2a2a2c; }
   #resetBtn:active { background: #3a3a3c; }
 
+  .seg { height: 46px; padding: 0 14px; margin: 0 3px; border: none; border-radius: 23px; background: #1d1d1f;
+    color: #999; font-size: 15px; font-weight: 700; letter-spacing: 1px; }
+  .seg.on { background: #3ddc5f; color: #000; }
   .hidden { display: none !important; }
 </style>
 </head>
@@ -141,25 +144,58 @@
   document.addEventListener("touchend", initAudio, false);
   document.addEventListener("click", initAudio, false);
 
-  function tone(freq, durMs, vol){
+  /* Beep styles: each sound is a few layered oscillators with a clean on/off envelope */
+  var STYLES = {
+    gym:    { label:"GYM",    parts:[{type:"sine", f:1000, g:0.55},{type:"sine", f:2000, g:0.18}], shortMs:220, longMs:1000, doneMs:1600 },
+    soft:   { label:"SOFT",   parts:[{type:"triangle", f:784, g:0.6}], shortMs:170, longMs:700, doneMs:1200 },
+    buzzer: { label:"BUZZER", parts:[{type:"sawtooth", f:196, g:0.3},{type:"sawtooth", f:199, g:0.3}], lowpass:1800, shortMs:260, longMs:1100, doneMs:1800 }
+  };
+  var soundStyle = "gym";
+  try { var saved = window.localStorage.getItem("wodBeep"); if (saved && STYLES[saved]) { soundStyle = saved; } } catch(e){}
+
+  function playStyle(name, ms){
     if (!actx) return;
+    var st = STYLES[name] || STYLES.gym;
     try {
-      var o = actx.createOscillator();
-      var g = actx.createGain();
-      o.type = "square";
-      o.frequency.value = freq;
-      var t = actx.currentTime;
-      g.gain.setValueAtTime(vol, t);
-      g.gain.exponentialRampToValueAtTime(0.0001, t + durMs/1000);
-      o.connect(g); g.connect(actx.destination);
-      o.start(t);
-      o.stop(t + durMs/1000 + 0.03);
+      var t = actx.currentTime + 0.01;
+      var dur = ms / 1000;
+      var out = actx.createGain();
+      out.gain.setValueAtTime(0, t);
+      out.gain.linearRampToValueAtTime(1, t + 0.008);
+      out.gain.setValueAtTime(1, t + dur - 0.02);
+      out.gain.linearRampToValueAtTime(0, t + dur);
+      var dest = actx.destination;
+      if (st.lowpass) {
+        var lp = actx.createBiquadFilter();
+        lp.type = "lowpass";
+        lp.frequency.value = st.lowpass;
+        lp.connect(dest);
+        dest = lp;
+      }
+      out.connect(dest);
+      for (var i=0; i<st.parts.length; i++) {
+        var pt = st.parts[i];
+        var o = actx.createOscillator();
+        var g = actx.createGain();
+        o.type = pt.type;
+        o.frequency.value = pt.f;
+        g.gain.value = pt.g;
+        o.connect(g); g.connect(out);
+        o.start(t);
+        o.stop(t + dur + 0.05);
+      }
     } catch(e){}
   }
-  function beepShort(){ tone(880, 150, 0.35); }
-  function beepGo(){ tone(1320, 650, 0.45); }
-  function beepSwitch(){ tone(1245, 420, 0.45); }
-  function beepDone(){ tone(1320, 300, 0.45); setTimeout(function(){ tone(990,300,0.45); }, 260); setTimeout(function(){ tone(660,500,0.45); }, 520); }
+  function beepShort(){ playStyle(soundStyle, STYLES[soundStyle].shortMs); }
+  function beepGo(){ playStyle(soundStyle, STYLES[soundStyle].longMs); }
+  function beepSwitch(){ playStyle(soundStyle, STYLES[soundStyle].longMs); }
+  function beepDone(){ playStyle(soundStyle, STYLES[soundStyle].doneMs); }
+  function previewCountdown(){
+    beepShort();
+    setTimeout(beepShort, 1000);
+    setTimeout(beepShort, 2000);
+    setTimeout(beepGo, 3000);
+  }
 
   /* ---------- Settings ---------- */
   var S = {
@@ -424,6 +460,12 @@
     }
     // count-in applies to all timer modes
     html += stepperHTML("countin", "COUNT-IN", 0, 30, 1);
+    html += '<div class="stepper"><div class="lbl">BEEP</div><div class="steprow">';
+    var keys = ["gym","soft","buzzer"];
+    for (var k=0; k<keys.length; k++) {
+      html += '<button class="seg' + (keys[k] === soundStyle ? ' on' : '') + '" data-sound="' + keys[k] + '">' + STYLES[keys[k]].label + '</button>';
+    }
+    html += '</div></div>';
     elSettings.innerHTML = html;
     refreshVals();
   }
@@ -439,6 +481,18 @@
 
   elSettings.addEventListener("click", function(ev){
     var t = ev.target;
+    if (t && t.getAttribute && t.getAttribute("data-sound")) {
+      soundStyle = t.getAttribute("data-sound");
+      try { window.localStorage.setItem("wodBeep", soundStyle); } catch(e){}
+      var segs = elSettings.querySelectorAll(".seg");
+      for (var q=0; q<segs.length; q++) {
+        segs[q].className = (segs[q].getAttribute("data-sound") === soundStyle) ? "seg on" : "seg";
+      }
+      initAudio();
+      setTimeout(beepShort, 30);
+      setTimeout(beepGo, 450);
+      return;
+    }
     if (!t || t.className.indexOf("stepbtn") < 0) { return; }
     var key = t.getAttribute("data-key");
     var min = parseInt(t.getAttribute("data-min"), 10);
@@ -462,7 +516,7 @@
     elStart.textContent = "START";
     elStart.className = "ctl";
     // tabs
-    var tabs = document.querySelectorAll(".tab");
+    var tabs = document.querySelectorAll(".tab[data-mode]");
     for (var i=0; i<tabs.length; i++){
       if (tabs[i].getAttribute("data-mode") === m) { tabs[i].className = "tab on"; }
       else { tabs[i].className = "tab"; }
@@ -481,7 +535,7 @@
     renderSettings();
   }
 
-  var tabEls = document.querySelectorAll(".tab");
+  var tabEls = document.querySelectorAll(".tab[data-mode]");
   for (var i=0; i<tabEls.length; i++){
     (function(btn){
       btn.addEventListener("click", function(){ setMode(btn.getAttribute("data-mode")); });
@@ -490,8 +544,7 @@
 
   document.getElementById("soundTest").addEventListener("click", function(){
     initAudio();
-    setTimeout(beepShort, 50);
-    setTimeout(beepGo, 450);
+    setTimeout(previewCountdown, 50);
   });
   elStart.addEventListener("click", onStart);
   elReset.addEventListener("click", onReset);
