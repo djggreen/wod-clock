@@ -1,0 +1,471 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black">
+<meta name="apple-mobile-web-app-title" content="WOD Clock">
+<title>WOD Clock</title>
+<style>
+  * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; -webkit-user-select: none; user-select: none; }
+  html, body { margin: 0; padding: 0; height: 100%; background: #000; overflow: hidden;
+    font-family: -apple-system, "Helvetica Neue", Helvetica, Arial, sans-serif; }
+  #app { position: absolute; top: 0; left: 0; right: 0; bottom: 0; display: -webkit-flex; display: flex;
+    -webkit-flex-direction: column; flex-direction: column; }
+
+  /* Tabs */
+  #tabs { -webkit-flex: 0 0 auto; flex: 0 0 auto; display: -webkit-flex; display: flex;
+    -webkit-justify-content: center; justify-content: center; -webkit-flex-wrap: wrap; flex-wrap: wrap;
+    padding: 6px 4px; background: #0a0a0a; border-bottom: 1px solid #1c1c1c; }
+  .tab { color: #888; background: transparent; border: none; font-size: 16px; font-weight: 600;
+    letter-spacing: 1px; padding: 10px 14px; margin: 2px; border-radius: 10px; }
+  .tab.on { color: #fff; background: #1d1d1f; }
+
+  /* Main display */
+  #main { -webkit-flex: 1 1 auto; flex: 1 1 auto; position: relative; display: -webkit-flex; display: flex;
+    -webkit-flex-direction: column; flex-direction: column; -webkit-align-items: center; align-items: center;
+    -webkit-justify-content: center; justify-content: center; overflow: hidden; }
+  #status { font-size: 7vmin; font-weight: 800; letter-spacing: 3px; color: #6cf; min-height: 8vmin; }
+  #round { font-size: 4.5vmin; font-weight: 600; letter-spacing: 2px; color: #777; min-height: 5vmin; margin-top: 2px; }
+  #digits { font-family: "SF Mono", "Menlo", "Courier New", monospace; font-weight: 700;
+    font-size: 30vmin; line-height: 1; color: #fff; margin: 1vmin 0; }
+  #datebar { font-size: 4vmin; color: #666; letter-spacing: 1px; min-height: 4vmin; }
+
+  .work #status { color: #3ddc5f; }
+  .rest #status { color: #ffb020; }
+  .rest #digits { color: #ffcf6b; }
+  .countin #status { color: #6cf; }
+  .done #status { color: #ff5b5b; }
+  .done #digits { color: #ff8585; }
+
+  /* Settings */
+  #settings { -webkit-flex: 0 0 auto; flex: 0 0 auto; display: -webkit-flex; display: flex;
+    -webkit-flex-wrap: wrap; flex-wrap: wrap; -webkit-justify-content: center; justify-content: center;
+    padding: 4px; }
+  .stepper { display: -webkit-flex; display: flex; -webkit-flex-direction: column; flex-direction: column;
+    -webkit-align-items: center; align-items: center; margin: 6px 10px; }
+  .stepper .lbl { color: #888; font-size: 13px; font-weight: 600; letter-spacing: 1px; margin-bottom: 4px; }
+  .steprow { display: -webkit-flex; display: flex; -webkit-align-items: center; align-items: center; }
+  .stepbtn { width: 46px; height: 46px; border-radius: 50%; border: none; background: #1d1d1f; color: #fff;
+    font-size: 26px; font-weight: 700; line-height: 46px; padding: 0; }
+  .stepbtn:active { background: #333; }
+  .stepval { color: #fff; font-size: 26px; font-weight: 700; min-width: 64px; text-align: center;
+    font-family: "SF Mono", "Menlo", monospace; }
+
+  /* Controls */
+  #controls { -webkit-flex: 0 0 auto; flex: 0 0 auto; display: -webkit-flex; display: flex;
+    padding: 8px; background: #0a0a0a; border-top: 1px solid #1c1c1c; }
+  .ctl { -webkit-flex: 1 1 0; flex: 1 1 0; margin: 0 5px; height: 72px; border: none; border-radius: 14px;
+    font-size: 22px; font-weight: 800; letter-spacing: 2px; color: #fff; }
+  #startBtn { background: #1a7f37; }
+  #startBtn:active { background: #165e2a; }
+  #startBtn.pause { background: #b07400; }
+  #resetBtn { background: #2a2a2c; }
+  #resetBtn:active { background: #3a3a3c; }
+
+  .hidden { display: none !important; }
+</style>
+</head>
+<body>
+<div id="app">
+  <div id="tabs">
+    <button class="tab" data-mode="time">CLOCK</button>
+    <button class="tab" data-mode="stopwatch">STOPWATCH</button>
+    <button class="tab" data-mode="amrap">AMRAP</button>
+    <button class="tab" data-mode="emom">EMOM</button>
+    <button class="tab" data-mode="tabata">TABATA</button>
+    <button class="tab" data-mode="interval">INTERVAL</button>
+  </div>
+
+  <div id="main">
+    <div id="status"></div>
+    <div id="round"></div>
+    <div id="digits">00:00</div>
+    <div id="datebar"></div>
+  </div>
+
+  <div id="settings"></div>
+
+  <div id="controls">
+    <button class="ctl" id="startBtn">START</button>
+    <button class="ctl" id="resetBtn">RESET</button>
+  </div>
+</div>
+
+<script>
+(function(){
+  "use strict";
+
+  var now = (window.performance && window.performance.now)
+    ? function(){ return window.performance.now(); }
+    : function(){ return Date.now(); };
+
+  /* ---------- Audio ---------- */
+  var AC = window.AudioContext || window.webkitAudioContext;
+  var actx = null;
+  function initAudio(){
+    try {
+      if (!actx && AC) { actx = new AC(); }
+      if (actx && actx.state === "suspended" && actx.resume) { actx.resume(); }
+    } catch(e){}
+  }
+  function tone(freq, durMs, vol){
+    if (!actx) return;
+    try {
+      var o = actx.createOscillator();
+      var g = actx.createGain();
+      o.type = "square";
+      o.frequency.value = freq;
+      var t = actx.currentTime;
+      g.gain.setValueAtTime(vol, t);
+      g.gain.exponentialRampToValueAtTime(0.0001, t + durMs/1000);
+      o.connect(g); g.connect(actx.destination);
+      o.start(t);
+      o.stop(t + durMs/1000 + 0.03);
+    } catch(e){}
+  }
+  function beepShort(){ tone(880, 150, 0.35); }
+  function beepGo(){ tone(1320, 650, 0.45); }
+  function beepSwitch(){ tone(1245, 420, 0.45); }
+  function beepDone(){ tone(1320, 300, 0.45); setTimeout(function(){ tone(990,300,0.45); }, 260); setTimeout(function(){ tone(660,500,0.45); }, 520); }
+
+  /* ---------- Settings ---------- */
+  var S = {
+    amrapMin: 20, amrapSec: 0,
+    emomSec: 60, emomRounds: 10,
+    tabWork: 20, tabRest: 10, tabRounds: 8,
+    intWork: 60, intRest: 30, intRounds: 5,
+    countin: 10
+  };
+
+  /* ---------- State ---------- */
+  var mode = "time";
+  var phases = [];
+  var idx = 0;
+  var running = false;
+  var paused = false;
+  var segStart = 0;
+  var phaseElapsed = 0;
+  var lastRemSec = null;
+  var rafId = null;
+  var clockTimer = null;
+
+  var elStatus = document.getElementById("status");
+  var elRound  = document.getElementById("round");
+  var elDigits = document.getElementById("digits");
+  var elDate   = document.getElementById("datebar");
+  var elMain   = document.getElementById("main");
+  var elSettings = document.getElementById("settings");
+  var elStart  = document.getElementById("startBtn");
+  var elReset  = document.getElementById("resetBtn");
+
+  function setDigits(txt){
+    elDigits.textContent = txt;
+    var vw = window.innerWidth, vh = window.innerHeight;
+    var byWidth = (vw * 0.94) / (String(txt).length * 0.62);
+    var fs = Math.min(Math.min(vw, vh) * 0.375, byWidth, vh * 0.40);
+    elDigits.style.fontSize = Math.floor(fs) + "px";
+  }
+  window.addEventListener("resize", function(){ setDigits(elDigits.textContent); });
+  window.addEventListener("orientationchange", function(){ setTimeout(function(){ setDigits(elDigits.textContent); }, 300); });
+
+  function pad(n){ n = Math.floor(n); return (n < 10 ? "0" : "") + n; }
+  function fmt(totalSec){
+    totalSec = Math.max(0, Math.floor(totalSec));
+    var h = Math.floor(totalSec/3600);
+    var m = Math.floor((totalSec%3600)/60);
+    var s = totalSec%60;
+    if (h > 0) { return h + ":" + pad(m) + ":" + pad(s); }
+    return pad(m) + ":" + pad(s);
+  }
+
+  function setClass(name){
+    elMain.className = "";
+    if (name) { elMain.className = name; }
+  }
+
+  /* ---------- Phase building ---------- */
+  function addCountIn(arr){
+    if (S.countin > 0) { arr.push({ kind:"countin", dur:S.countin, status:"GET READY", round:"" }); }
+  }
+
+  function buildPhases(m){
+    var arr = [];
+    if (m === "stopwatch") {
+      addCountIn(arr);
+      arr.push({ kind:"up", dur:0, status:"TIME", round:"" });
+    } else if (m === "amrap") {
+      addCountIn(arr);
+      arr.push({ kind:"work", dur:(S.amrapMin*60 + S.amrapSec), status:"AMRAP", round:"" });
+    } else if (m === "emom") {
+      addCountIn(arr);
+      for (var i=1; i<=S.emomRounds; i++){
+        arr.push({ kind:"work", dur:S.emomSec, status:"WORK", round:"ROUND " + i + " / " + S.emomRounds });
+      }
+    } else if (m === "tabata") {
+      addCountIn(arr);
+      for (var j=1; j<=S.tabRounds; j++){
+        arr.push({ kind:"work", dur:S.tabWork, status:"WORK", round:"ROUND " + j + " / " + S.tabRounds });
+        if (j < S.tabRounds) { arr.push({ kind:"rest", dur:S.tabRest, status:"REST", round:"ROUND " + j + " / " + S.tabRounds }); }
+      }
+    } else if (m === "interval") {
+      addCountIn(arr);
+      for (var k=1; k<=S.intRounds; k++){
+        arr.push({ kind:"work", dur:S.intWork, status:"WORK", round:"ROUND " + k + " / " + S.intRounds });
+        if (k < S.intRounds) { arr.push({ kind:"rest", dur:S.intRest, status:"REST", round:"ROUND " + k + " / " + S.intRounds }); }
+      }
+    }
+    return arr;
+  }
+
+  /* ---------- Rendering idle preview ---------- */
+  function previewFirstReal(){
+    var m = mode;
+    if (m === "stopwatch") { elStatus.textContent = "TIME"; elRound.textContent = ""; setDigits("00:00"); setClass(""); }
+    else if (m === "amrap") { elStatus.textContent = "AMRAP"; elRound.textContent = ""; setDigits(fmt(S.amrapMin*60 + S.amrapSec)); setClass("work"); }
+    else if (m === "emom") { elStatus.textContent = "EMOM"; elRound.textContent = "ROUND 1 / " + S.emomRounds; setDigits(fmt(S.emomSec)); setClass("work"); }
+    else if (m === "tabata") { elStatus.textContent = "TABATA"; elRound.textContent = "ROUND 1 / " + S.tabRounds; setDigits(fmt(S.tabWork)); setClass("work"); }
+    else if (m === "interval") { elStatus.textContent = "INTERVAL"; elRound.textContent = "ROUND 1 / " + S.intRounds; setDigits(fmt(S.intWork)); setClass("work"); }
+  }
+
+  /* ---------- Time of day ---------- */
+  var DAYS = ["Sunday","Monday","Tuesday","Wednesday","Thursday","Friday","Saturday"];
+  var MONTHS = ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"];
+  function renderClock(){
+    var d = new Date();
+    var h = d.getHours(); var ap = h >= 12 ? "PM" : "AM";
+    var h12 = h % 12; if (h12 === 0) { h12 = 12; }
+    elStatus.textContent = ap;
+    elRound.textContent = "";
+    setDigits(h12 + ":" + pad(d.getMinutes()) + ":" + pad(d.getSeconds()));
+    elDate.textContent = DAYS[d.getDay()] + ", " + MONTHS[d.getMonth()] + " " + d.getDate();
+    setClass("");
+  }
+  function startClock(){ stopClock(); renderClock(); clockTimer = setInterval(renderClock, 1000); }
+  function stopClock(){ if (clockTimer) { clearInterval(clockTimer); clockTimer = null; } }
+
+  /* ---------- Timer engine ---------- */
+  function applyPhaseLabels(ph){
+    elStatus.textContent = ph.status;
+    elRound.textContent = ph.round;
+    if (ph.kind === "rest") { setClass("rest"); }
+    else if (ph.kind === "countin") { setClass("countin"); }
+    else { setClass("work"); }
+  }
+
+  function startTimers(){
+    phases = buildPhases(mode);
+    if (phases.length === 0) { return; }
+    idx = 0;
+    phaseElapsed = 0;
+    segStart = now();
+    lastRemSec = null;
+    running = true;
+    paused = false;
+    elDate.textContent = "";
+    applyPhaseLabels(phases[0]);
+    loop();
+  }
+
+  function loop(){
+    if (!running || paused) { return; }
+    tick();
+    rafId = window.requestAnimationFrame(loop);
+  }
+
+  function tick(){
+    var ph = phases[idx];
+    var eMs = phaseElapsed + (now() - segStart);
+
+    if (ph.kind === "up") {
+      setDigits(fmt(eMs/1000));
+      return;
+    }
+
+    var remMs = ph.dur*1000 - eMs;
+    if (remMs <= 0) {
+      // phase complete
+      if (ph.kind === "countin") { beepGo(); } else { beepSwitch(); }
+      idx++;
+      if (idx >= phases.length) { finish(); return; }
+      phaseElapsed = 0;
+      segStart = now();
+      lastRemSec = null;
+      applyPhaseLabels(phases[idx]);
+      // render new phase immediately
+      var np = phases[idx];
+      if (np.kind === "up") { setDigits(fmt(0)); }
+      else { setDigits(fmt(np.dur)); }
+      return;
+    }
+
+    setDigits(fmt(remMs/1000));
+
+    var remSec = Math.ceil(remMs/1000);
+    if (remSec !== lastRemSec) {
+      lastRemSec = remSec;
+      if (remSec <= 3 && remSec >= 1) { beepShort(); }
+    }
+  }
+
+  function finish(){
+    running = false;
+    paused = false;
+    if (rafId) { window.cancelAnimationFrame(rafId); rafId = null; }
+    setClass("done");
+    elStatus.textContent = "DONE";
+    elRound.textContent = "";
+    setDigits(fmt(0));
+    beepDone();
+    elStart.textContent = "START";
+    elStart.className = "ctl";
+  }
+
+  /* ---------- Controls ---------- */
+  function onStart(){
+    initAudio();
+    if (mode === "time") { return; }
+
+    if (!running) {
+      startTimers();
+      elStart.textContent = "PAUSE";
+      elStart.className = "ctl pause";
+      return;
+    }
+    // running
+    if (!paused) {
+      // pause
+      paused = true;
+      phaseElapsed = phaseElapsed + (now() - segStart);
+      if (rafId) { window.cancelAnimationFrame(rafId); rafId = null; }
+      elStart.textContent = "RESUME";
+      elStart.className = "ctl pause";
+    } else {
+      // resume
+      paused = false;
+      segStart = now();
+      elStart.textContent = "PAUSE";
+      elStart.className = "ctl pause";
+      loop();
+    }
+  }
+
+  function onReset(){
+    running = false;
+    paused = false;
+    if (rafId) { window.cancelAnimationFrame(rafId); rafId = null; }
+    elStart.textContent = "START";
+    elStart.className = "ctl";
+    if (mode === "time") { startClock(); }
+    else { elDate.textContent = ""; previewFirstReal(); }
+  }
+
+  /* ---------- Settings UI ---------- */
+  function stepperHTML(key, label, min, max, step, isTime){
+    return '<div class="stepper">' +
+      '<div class="lbl">' + label + '</div>' +
+      '<div class="steprow">' +
+      '<button class="stepbtn" data-act="dec" data-key="' + key + '" data-min="' + min + '" data-max="' + max + '" data-step="' + step + '">&minus;</button>' +
+      '<div class="stepval" id="val_' + key + '"></div>' +
+      '<button class="stepbtn" data-act="inc" data-key="' + key + '" data-min="' + min + '" data-max="' + max + '" data-step="' + step + '">+</button>' +
+      '</div></div>';
+  }
+
+  function renderSettings(){
+    var html = "";
+    if (mode === "time") { elSettings.innerHTML = ""; return; }
+
+    if (mode === "amrap") {
+      html += stepperHTML("amrapMin", "MINUTES", 0, 90, 1);
+      html += stepperHTML("amrapSec", "SECONDS", 0, 59, 5);
+    } else if (mode === "emom") {
+      html += stepperHTML("emomSec", "EVERY (SEC)", 10, 300, 5);
+      html += stepperHTML("emomRounds", "ROUNDS", 1, 60, 1);
+    } else if (mode === "tabata") {
+      html += stepperHTML("tabWork", "WORK (SEC)", 5, 300, 5);
+      html += stepperHTML("tabRest", "REST (SEC)", 0, 300, 5);
+      html += stepperHTML("tabRounds", "ROUNDS", 1, 40, 1);
+    } else if (mode === "interval") {
+      html += stepperHTML("intWork", "WORK (SEC)", 5, 600, 5);
+      html += stepperHTML("intRest", "REST (SEC)", 0, 600, 5);
+      html += stepperHTML("intRounds", "ROUNDS", 1, 60, 1);
+    }
+    // count-in applies to all timer modes
+    html += stepperHTML("countin", "COUNT-IN", 0, 30, 1);
+    elSettings.innerHTML = html;
+    refreshVals();
+  }
+
+  function refreshVals(){
+    for (var key in S) {
+      if (S.hasOwnProperty(key)) {
+        var el = document.getElementById("val_" + key);
+        if (el) { el.textContent = S[key]; }
+      }
+    }
+  }
+
+  elSettings.addEventListener("click", function(ev){
+    var t = ev.target;
+    if (!t || t.className.indexOf("stepbtn") < 0) { return; }
+    var key = t.getAttribute("data-key");
+    var min = parseInt(t.getAttribute("data-min"), 10);
+    var max = parseInt(t.getAttribute("data-max"), 10);
+    var step = parseInt(t.getAttribute("data-step"), 10);
+    var act = t.getAttribute("data-act");
+    var v = S[key] + (act === "inc" ? step : -step);
+    if (v < min) { v = min; }
+    if (v > max) { v = max; }
+    S[key] = v;
+    refreshVals();
+    if (!running) { previewFirstReal(); }
+  });
+
+  /* ---------- Mode switching ---------- */
+  function setMode(m){
+    mode = m;
+    // reset timer state
+    running = false; paused = false;
+    if (rafId) { window.cancelAnimationFrame(rafId); rafId = null; }
+    elStart.textContent = "START";
+    elStart.className = "ctl";
+    // tabs
+    var tabs = document.querySelectorAll(".tab");
+    for (var i=0; i<tabs.length; i++){
+      if (tabs[i].getAttribute("data-mode") === m) { tabs[i].className = "tab on"; }
+      else { tabs[i].className = "tab"; }
+    }
+    // controls visibility
+    if (m === "time") {
+      document.getElementById("controls").className = "hidden";
+      stopClock();
+      startClock();
+    } else {
+      document.getElementById("controls").className = "";
+      stopClock();
+      elDate.textContent = "";
+      previewFirstReal();
+    }
+    renderSettings();
+  }
+
+  var tabEls = document.querySelectorAll(".tab");
+  for (var i=0; i<tabEls.length; i++){
+    (function(btn){
+      btn.addEventListener("click", function(){ setMode(btn.getAttribute("data-mode")); });
+    })(tabEls[i]);
+  }
+
+  elStart.addEventListener("click", onStart);
+  elReset.addEventListener("click", onReset);
+
+  // Prevent double-tap zoom / scroll bounce
+  document.addEventListener("touchmove", function(e){ e.preventDefault(); }, { passive:false });
+
+  // Start on CLOCK
+  setMode("time");
+})();
+</script>
+</body>
+</html>
