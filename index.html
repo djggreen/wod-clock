@@ -76,6 +76,7 @@
     <button class="tab" data-mode="emom">EMOM</button>
     <button class="tab" data-mode="tabata">TABATA</button>
     <button class="tab" data-mode="interval">INTERVAL</button>
+    <button class="tab" id="soundTest">&#128266; TEST</button>
   </div>
 
   <div id="main">
@@ -104,12 +105,42 @@
   /* ---------- Audio ---------- */
   var AC = window.AudioContext || window.webkitAudioContext;
   var actx = null;
+  var SILENT_WAV = "data:audio/wav;base64,UklGRvQHAABXQVZFZm10IBAAAAABAAEAQB8AAEAfAAABAAgAZGF0YdAHAACAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgA==";
+  var silentEl = null;
+  var unlocked = false;
   function initAudio(){
     try {
       if (!actx && AC) { actx = new AC(); }
       if (actx && actx.state === "suspended" && actx.resume) { actx.resume(); }
+      if (actx && !unlocked) {
+        // Older iOS only unlocks Web Audio if a sound actually starts during the tap.
+        var buf = actx.createBuffer(1, 1, 22050);
+        var src = actx.createBufferSource();
+        src.buffer = buf;
+        src.connect(actx.destination);
+        if (src.start) { src.start(0); } else if (src.noteOn) { src.noteOn(0); }
+        unlocked = true;
+      }
     } catch(e){}
+    try {
+      // A silent looping media track puts iOS in "playback" mode,
+      // so beeps still play when the mute switch is on.
+      if (!silentEl) {
+        silentEl = document.createElement("audio");
+        silentEl.setAttribute("x-webkit-airplay", "deny");
+        silentEl.preload = "auto";
+        silentEl.loop = true;
+        silentEl.src = SILENT_WAV;
+      }
+      if (silentEl.paused) {
+        var pr = silentEl.play();
+        if (pr && pr.catch) { pr.catch(function(){}); }
+      }
+    } catch(e2){}
   }
+  document.addEventListener("touchend", initAudio, false);
+  document.addEventListener("click", initAudio, false);
+
   function tone(freq, durMs, vol){
     if (!actx) return;
     try {
@@ -457,6 +488,11 @@
     })(tabEls[i]);
   }
 
+  document.getElementById("soundTest").addEventListener("click", function(){
+    initAudio();
+    setTimeout(beepShort, 50);
+    setTimeout(beepGo, 450);
+  });
   elStart.addEventListener("click", onStart);
   elReset.addEventListener("click", onReset);
 
